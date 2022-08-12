@@ -86,11 +86,11 @@ int main(int argc, char const* const* argv) {
             rapidjson::StringBuffer buffer;  
             rapidjson::PrettyWriter<rapidjson::StringBuffer> writer(buffer);  
             commandsDoc.Accept(writer);
-            delete buff;
             auto file = fopen(prop["compileCommands"].GetString(), "wb");
             fwrite(buffer.GetString(), 1, buffer.GetLength(), file);
             fclose(file);
         }
+        delete buff;
     }
     printf("repair complete!");
     system("pause");
