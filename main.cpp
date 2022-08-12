@@ -1,7 +1,7 @@
 #include <string>
 #include <vector>
-#include <GxJsonUtility.h>
-#include <rapidjson/writer.h>
+
+#include <rapidjson/document.h>
 #include <rapidjson/prettywriter.h>
 #include <rapidjson/allocators.h>
 
@@ -44,21 +44,6 @@ public:
     }
 };
 
-struct c_cpp_props_conf_t {
-    std::string name;
-    std::string intelliSenseMode;
-    std::string compileCommands;
-    std::string cStandard;
-    std::string cppStandard;
-    GX_JSON(name, intelliSenseMode, compileCommands, cStandard, cppStandard)
-};
-
-struct c_cpp_props_t {
-    std::vector<c_cpp_props_conf_t> configurations;
-    int version;
-    GX_JSON(configurations, version)
-};
-
 int main(int argc, char const* const* argv) {
     std::string rootpath = argv[0];
     auto pos = rootpath.find_last_of("/\\");
@@ -73,32 +58,41 @@ int main(int argc, char const* const* argv) {
         propsJsonPath = std::string(argv[1]) + "\\.vscode\\c_cpp_properties.json";
     }
     auto buff = Buffer::createFileBuffer(propsJsonPath.c_str());
-    c_cpp_props_t props;
-    props.deserializeFromJSON((char const*)buff->buffer());
+    rapidjson::Document propsDoc;
+    propsDoc.Parse((char const*)buff->buffer());
     delete buff;
 
-    for(auto prop:props.configurations) {
-        buff = Buffer::createFileBuffer(prop.compileCommands.c_str());
+    auto& configurations = propsDoc.GetObject()["configurations"].GetArray();
+    for(auto const& prop:configurations) {
+        buff = Buffer::createFileBuffer(prop["compileCommands"].GetString());
         rapidjson::Document commandsDoc;
         commandsDoc.Parse((char const*)buff->buffer(), buff->length());
         auto arr = commandsDoc.GetArray();
+        bool needRepair = false;
         for(auto iter = arr.begin(); iter!=arr.end(); ++iter) {
             auto obj = iter->GetObject();
             auto cmd = obj.FindMember("command");
             if(cmd != obj.end()) {
                 auto str = (*cmd).value.GetString();
-                auto pos = strstr(str, "@");
-                std::string recomposed = "\"" + std::string(str, pos - str -1) + "\"" + (pos - 1);
-                 cmd->value.SetString(recomposed.c_str(), recomposed.size(), commandsDoc.GetAllocator());
+                if(str[0] == '\\') {
+                    needRepair = true;
+                    auto pos = strstr(str, "@");
+                    std::string recomposed = "\"" + std::string(str, pos - str -1) + "\"" + (pos - 1);
+                    cmd->value.SetString(recomposed.c_str(), recomposed.size(), commandsDoc.GetAllocator());
+                }
             }
         }
-        rapidjson::StringBuffer buffer;  
-        rapidjson::PrettyWriter<rapidjson::StringBuffer> writer(buffer);  
-        commandsDoc.Accept(writer);
-        delete buff;
-        auto file = fopen(prop.compileCommands.c_str(), "wb");
-        fwrite(buffer.GetString(), 1, buffer.GetLength(), file);
-        fclose(file);
+        if(needRepair) {
+            rapidjson::StringBuffer buffer;  
+            rapidjson::PrettyWriter<rapidjson::StringBuffer> writer(buffer);  
+            commandsDoc.Accept(writer);
+            delete buff;
+            auto file = fopen(prop["compileCommands"].GetString(), "wb");
+            fwrite(buffer.GetString(), 1, buffer.GetLength(), file);
+            fclose(file);
+        }
     }
+    printf("repair complete!");
+    system("pause");
     return 0;
 }
